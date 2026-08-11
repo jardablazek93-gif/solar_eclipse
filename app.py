@@ -11,7 +11,7 @@ from matplotlib.patches import Circle
 from skyfield.api import load, wgs84
 from skyfield import almanac
 
-# Nastavení stránky Streamlit (moderní layout na celou šířku)
+# Nastavení stránky Streamlit
 st.set_page_config(
     page_title="Zatmění Slunce - Webová kalkulace & Simulace",
     page_icon="☀️",
@@ -171,7 +171,7 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
 st.title("☀️ Zatmění Slunce – Kalkulátor & 2D Interaktivní Simulátor")
 st.markdown("Aplikace počítá přesné astronomické efemeridy JPL DE440 pro libovolné místo na Zemi a generuje plynulou 2D simulaci průchodu Měsíce.")
 
-# --- BOČNÍ PANEL (VSTUPNÍ PARAMETRY) ---
+# --- BOČNÍ PANEL ---
 with st.sidebar:
     st.header("⚙️ Vstupní nastavení")
     
@@ -209,7 +209,6 @@ if btn_compute or "eclipse_results" in st.session_state:
     else:
         st.subheader(f"📊 Nalezená viditelná zatmění ({len(results)})")
         
-        # Zobrazení přehledné tabulky
         table_data = [{
             "Datum": r["date"],
             "Čas Maxima (UTC)": r["time_utc"],
@@ -220,7 +219,6 @@ if btn_compute or "eclipse_results" in st.session_state:
         
         st.dataframe(table_data, use_container_width=True)
 
-        # Výběr zatmění pro detailní simulaci
         st.divider()
         st.subheader("🔍 Detailní 2D Simulace a Analýza")
         
@@ -229,7 +227,6 @@ if btn_compute or "eclipse_results" in st.session_state:
 
         selected_eclipse = results[selected_idx]
 
-        # Předpočet 2D časové řady pro vybrané zatmění (4 hodiny po 1 minutě)
         ts, eph = load_ephemeris()
         sun, moon, earth = eph['sun'], eph['moon'], eph['earth']
         observer = earth + wgs84.latlon(st.session_state.current_lat, st.session_state.current_lon, elevation_m=st.session_state.current_elev)
@@ -284,18 +281,19 @@ if btn_compute or "eclipse_results" in st.session_state:
                 "moon_r": np.degrees(m_rad) * 60.0
             })
 
-        # Interaktivní posuvník času pro simulaci
+        max_idx = max(0, len(frames_data) - 1)
+        default_idx = max_idx // 2
+
         slider_frame = st.slider(
             "⏱️ Posun času v průběhu zatmění (UTC):",
             min_value=0,
-            max_value=240,
-            value=120,
-            format_func=lambda i: frames_data[i]["time_str"]
+            max_value=max_idx,
+            value=default_idx,
+            format_func=lambda i: frames_data[int(i)]["time_str"] if 0 <= int(i) < len(frames_data) else ""
         )
 
-        current_frame = frames_data[slider_frame]
+        current_frame = frames_data[int(slider_frame)]
 
-        # Vykreslení vedle sebe (Graf + 2D Náhled)
         col_g1, col_g2 = st.columns([1.2, 1])
 
         with col_g1:
@@ -315,7 +313,6 @@ if btn_compute or "eclipse_results" in st.session_state:
             ax_graph_alt.plot(dt_list, altitudes, color=color_alt, linestyle='--', linewidth=1.2)
             ax_graph_alt.axhline(0, color='gray', linestyle=':', linewidth=1)
 
-            # Červená Ryska Aktuálního Času
             ax_graph.axvline(current_frame["dt"], color='red', linestyle='-', linewidth=2)
 
             ax_graph.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
