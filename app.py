@@ -374,16 +374,29 @@ if btn_compute or "eclipse_results" in st.session_state:
             selected_eclipse['raw_time']
         )
 
-        # Časový posuvník
+        # BEZPEČNÁ FORMÁTOVACÍ FUNKCE PRO SLIDER (Řeší TypeError float/int i IndexOutOfBounds)
+        def safe_format_slider_time(val):
+            try:
+                idx = int(val)
+                if 0 <= idx < len(frames_data):
+                    return frames_data[idx]["time_str"]
+            except (ValueError, TypeError, IndexError):
+                pass
+            return ""
+
+        max_slider_val = max(0, len(frames_data) - 1)
+        default_slider_val = min(len(frames_data) // 2, max_slider_val)
+
+        # Časový posuvník s bezpečným přetypováním
         slider_idx = st.slider(
             t["slider_label"],
             min_value=0,
-            max_value=len(frames_data) - 1,
-            value=len(frames_data) // 2,
-            format_func=lambda i: frames_data[i]["time_str"]
+            max_value=max_slider_val,
+            value=default_slider_val,
+            format_func=safe_format_slider_time
         )
 
-        current_frame = frames_data[slider_idx]
+        current_frame = frames_data[int(slider_idx)]
 
         # Vykreslení grafu a simulace
         col_g1, col_g2 = st.columns([1.2, 1])
