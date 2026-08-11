@@ -27,8 +27,8 @@ R_MOON_KM = 1737.4
 # ==============================================================================
 TEXTS = {
     "CZ": {
-        "page_title": "☀️ Solar Eclipse – Kalkulátor a plynulý 2D Simulátor",
-        "page_desc": "Výpočet přesných JPL DE440 efemerid pro libovolné místo na Zemi s plynulou 2D simulací průběhu.",
+        "page_title": "Solar Eclipse – Kalkulátor zatmění Slunce",
+        "page_desc": "Výpočet zatmění Slunce pro libovolné místo na Zemi s 2D simulací průběhu.",
         "sidebar_header": "⚙️ Vstupní parametry",
         "lang_label": "🌐 Jazyk / Language:",
         "coord_label": "Souřadnice (WGS84):",
@@ -64,8 +64,8 @@ TEXTS = {
         "err_coord": "Chyba ve formátu souřadnic:"
     },
     "EN": {
-        "page_title": "☀️ Solar Eclipse – Calculator & Smooth 2D Simulator",
-        "page_desc": "Calculation of precise JPL DE440 ephemerides for any location on Earth with smooth 2D simulation.",
+        "page_title": "☀️ Solar Eclipse – Calculator",
+        "page_desc": "Calculation of solar eclipse for any location on Earth with 2D simulation.",
         "sidebar_header": "⚙️ Input Parameters",
         "lang_label": "🌐 Language / Jazyk:",
         "coord_label": "Coordinates (WGS84):",
