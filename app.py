@@ -11,27 +11,27 @@ from matplotlib.patches import Circle
 from skyfield.api import load, wgs84
 from skyfield import almanac
 
-# Streamlit Page Configuration
+# Konfigurace stránky Streamlit
 st.set_page_config(
     page_title="Solar Eclipse - Web Calculator & Simulation",
     page_icon="☀️",
     layout="wide"
 )
 
-# Celestial body radii (in km)
+# Poloměry těles (v km)
 R_SUN_KM = 696340.0
 R_MOON_KM = 1737.4
 
 def parse_coordinates(coord_str):
-    """Parses a coordinate string into a float pair (lat, lon)."""
+    """Naparsuje řetězec se souřadnicemi na dvojici float (lat, lon)."""
     parts = [p.strip() for p in coord_str.split(',')]
     if len(parts) != 2:
-        raise ValueError("Enter coordinates in the format 'Latitude, Longitude' (e.g., 50.0835494N, 14.4341414E)")
+        raise ValueError("Zadejte souřadnice ve tvaru 'Šířka, Délka' (např. 50.0835494N, 14.4341414E)")
 
     def parse_part(part, pos_dirs, neg_dirs):
         match = re.search(r'([-+]?\d+(?:\.\d+)?)\s*([NSEWnsew]?)', part)
         if not match:
-            raise ValueError(f"Invalid coordinate format: {part}")
+            raise ValueError(f"Neplatný formát souřadnice: {part}")
         val = float(match.group(1))
         dir_char = match.group(2).upper()
         if dir_char in neg_dirs:
@@ -44,15 +44,15 @@ def parse_coordinates(coord_str):
     lon = parse_part(parts[1], ['E'], ['W'])
 
     if not (-90.0 <= lat <= 90.0):
-        raise ValueError("Latitude must be between -90 and 90 degrees.")
+        raise ValueError("Zeměpisná šířka musí být v rozsahu -90 až 90 stupňů.")
     if not (-180.0 <= lon <= 180.0):
-        raise ValueError("Longitude must be between -180 and 180 degrees.")
+        raise ValueError("Zeměpisná délka musí být v rozsahu -180 až 180 stupňů.")
 
     return lat, lon
 
 @st.cache_data(ttl=86400)
 def fetch_elevation(lat, lon):
-    """Fetches elevation from Open-Meteo API with caching."""
+    """Zjištění nadmořské výšky z Open-Meteo API s kešováním."""
     try:
         url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
         res = requests.get(url, timeout=5).json()
@@ -63,7 +63,7 @@ def fetch_elevation(lat, lon):
     return 0.0
 
 def calculate_circle_intersection_area(r_s, r_m, d):
-    """Calculates the intersection area of two circles on the celestial sphere."""
+    """Spočítá plochu překryvu dvou kružnic na obloze."""
     if d >= r_s + r_m:
         return 0.0
     if d <= abs(r_s - r_m):
@@ -79,13 +79,13 @@ def calculate_circle_intersection_area(r_s, r_m, d):
 
 @st.cache_resource
 def load_ephemeris():
-    """Loads JPL DE440 ephemerides with caching."""
+    """Načte astronomické efemeridy JPL DE440 s kešováním."""
     ts = load.timescale()
     eph = load('de440.bsp')
     return ts, eph
 
 def compute_eclipses(lat, lon, elevation, start_year, end_year):
-    """Computes visible eclipses for the specified period and location."""
+    """Vypočítá viditelná zatmění pro zadané období a souřadnice."""
     ts, eph = load_ephemeris()
     sun, moon, earth = eph['sun'], eph['moon'], eph['earth']
     observer = earth + wgs84.latlon(lat, lon, elevation_m=elevation)
@@ -167,11 +167,11 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
     progress_bar.empty()
     return results
 
-# --- APP TITLE ---
+# --- NADPIS ---
 st.title("☀️ Solar Eclipse – Calculator & 2D Interactive Simulator")
 st.markdown("This application computes high-precision JPL DE440 ephemerides for any location on Earth and generates a 2D simulation of the Moon's transit across the Sun.")
 
-# --- SIDEBAR ---
+# --- BOČNÍ PANEL ---
 with st.sidebar:
     st.header("⚙️ Input Parameters")
     
@@ -185,7 +185,7 @@ with st.sidebar:
         
     btn_compute = st.button("🚀 Calculate Eclipses", type="primary", use_container_width=True)
 
-# --- MAIN LOGIC ---
+# --- HLAVNÍ LOGIKA ---
 try:
     lat, lon = parse_coordinates(coord_input)
     elevation = fetch_elevation(lat, lon)
@@ -281,18 +281,15 @@ if btn_compute or "eclipse_results" in st.session_state:
                 "moon_r": np.degrees(m_rad) * 60.0
             })
 
-        max_idx = max(0, len(frames_data) - 1)
-        default_idx = max_idx // 2
-
-        slider_frame = st.slider(
+        # Zde nahrazujeme st.slider komponentou st.select_slider pro plnou kompatibilitu
+        default_frame = frames_data[len(frames_data) // 2]
+        
+        current_frame = st.select_slider(
             "⏱️ Time offset during eclipse (UTC):",
-            min_value=0,
-            max_value=max_idx,
-            value=default_idx,
-            format_func=lambda i: frames_data[int(i)]["time_str"] if 0 <= int(i) < len(frames_data) else ""
+            options=frames_data,
+            value=default_frame,
+            format_func=lambda f: f["time_str"] if isinstance(f, dict) and "time_str" in f else ""
         )
-
-        current_frame = frames_data[int(slider_frame)]
 
         col_g1, col_g2 = st.columns([1.2, 1])
 
