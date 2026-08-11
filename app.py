@@ -374,29 +374,18 @@ if btn_compute or "eclipse_results" in st.session_state:
             selected_eclipse['raw_time']
         )
 
-        # BEZPEČNÁ FORMÁTOVACÍ FUNKCE PRO SLIDER (Řeší TypeError float/int i IndexOutOfBounds)
-        def safe_format_slider_time(val):
-            try:
-                idx = int(val)
-                if 0 <= idx < len(frames_data):
-                    return frames_data[idx]["time_str"]
-            except (ValueError, TypeError, IndexError):
-                pass
-            return ""
+        # BEZPEČNÝ SELECT_SLIDER PRO TEXTOVÉ ŘETĚZCE (Zabraňuje TypeError na Pythonu 3.14 / Streamlit Cloud)
+        time_options = [f["time_str"] for f in frames_data]
+        default_time = time_options[len(time_options) // 2]
 
-        max_slider_val = max(0, len(frames_data) - 1)
-        default_slider_val = min(len(frames_data) // 2, max_slider_val)
-
-        # Časový posuvník s bezpečným přetypováním
-        slider_idx = st.slider(
+        selected_time_str = st.select_slider(
             t["slider_label"],
-            min_value=0,
-            max_value=max_slider_val,
-            value=default_slider_val,
-            format_func=safe_format_slider_time
+            options=time_options,
+            value=default_time
         )
 
-        current_frame = frames_data[int(slider_idx)]
+        # Najde přesný rámec dat odpovídající vybranému času
+        current_frame = next(f for f in frames_data if f["time_str"] == selected_time_str)
 
         # Vykreslení grafu a simulace
         col_g1, col_g2 = st.columns([1.2, 1])
