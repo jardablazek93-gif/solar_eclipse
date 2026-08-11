@@ -11,27 +11,27 @@ from matplotlib.patches import Circle
 from skyfield.api import load, wgs84
 from skyfield import almanac
 
-# Nastavení stránky Streamlit
+# Streamlit Page Configuration
 st.set_page_config(
-    page_title="Zatmění Slunce - Webová kalkulace & Simulace",
+    page_title="Solar Eclipse - Web Calculator & Simulation",
     page_icon="☀️",
     layout="wide"
 )
 
-# Poloměry těles (v km)
+# Celestial body radii (in km)
 R_SUN_KM = 696340.0
 R_MOON_KM = 1737.4
 
 def parse_coordinates(coord_str):
-    """Naparsuje řetězec se souřadnicemi na dvojici float (lat, lon)."""
+    """Parses a coordinate string into a float pair (lat, lon)."""
     parts = [p.strip() for p in coord_str.split(',')]
     if len(parts) != 2:
-        raise ValueError("Zadejte souřadnice ve tvaru 'Šířka, Délka' (např. 49.8144375N, 14.4362431E)")
+        raise ValueError("Enter coordinates in the format 'Latitude, Longitude' (e.g., 50.0835494N, 14.4341414E)")
 
     def parse_part(part, pos_dirs, neg_dirs):
         match = re.search(r'([-+]?\d+(?:\.\d+)?)\s*([NSEWnsew]?)', part)
         if not match:
-            raise ValueError(f"Neplatný formát souřadnice: {part}")
+            raise ValueError(f"Invalid coordinate format: {part}")
         val = float(match.group(1))
         dir_char = match.group(2).upper()
         if dir_char in neg_dirs:
@@ -44,15 +44,15 @@ def parse_coordinates(coord_str):
     lon = parse_part(parts[1], ['E'], ['W'])
 
     if not (-90.0 <= lat <= 90.0):
-        raise ValueError("Zeměpisná šířka musí být v rozsahu -90 až 90 stupňů.")
+        raise ValueError("Latitude must be between -90 and 90 degrees.")
     if not (-180.0 <= lon <= 180.0):
-        raise ValueError("Zeměpisná délka musí být v rozsahu -180 až 180 stupňů.")
+        raise ValueError("Longitude must be between -180 and 180 degrees.")
 
     return lat, lon
 
 @st.cache_data(ttl=86400)
 def fetch_elevation(lat, lon):
-    """Zjištění nadmořské výšky z Open-Meteo API s kešováním."""
+    """Fetches elevation from Open-Meteo API with caching."""
     try:
         url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
         res = requests.get(url, timeout=5).json()
@@ -63,7 +63,7 @@ def fetch_elevation(lat, lon):
     return 0.0
 
 def calculate_circle_intersection_area(r_s, r_m, d):
-    """Spočítá plochu překryvu dvou kružnic na obloze."""
+    """Calculates the intersection area of two circles on the celestial sphere."""
     if d >= r_s + r_m:
         return 0.0
     if d <= abs(r_s - r_m):
@@ -79,13 +79,13 @@ def calculate_circle_intersection_area(r_s, r_m, d):
 
 @st.cache_resource
 def load_ephemeris():
-    """Načte astronomické efemeridy JPL DE440 s kešováním."""
+    """Loads JPL DE440 ephemerides with caching."""
     ts = load.timescale()
     eph = load('de440.bsp')
     return ts, eph
 
 def compute_eclipses(lat, lon, elevation, start_year, end_year):
-    """Vypočítá viditelná zatmění pro zadané období a souřadnice."""
+    """Computes visible eclipses for the specified period and location."""
     ts, eph = load_ephemeris()
     sun, moon, earth = eph['sun'], eph['moon'], eph['earth']
     observer = earth + wgs84.latlon(lat, lon, elevation_m=elevation)
@@ -99,11 +99,11 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
     new_moons = times[phases == 0]
     results = []
 
-    progress_bar = st.progress(0, text="Probíhá astronomická analýza...")
+    progress_bar = st.progress(0, text="Astronomical analysis in progress...")
     total_nm = len(new_moons)
 
     for i, nm_time in enumerate(new_moons):
-        progress_bar.progress((i + 1) / total_nm, text=f"Analýza novoluní {i+1}/{total_nm} ({nm_time.utc_strftime('%Y-%m')})...")
+        progress_bar.progress((i + 1) / total_nm, text=f"Analyzing new moon {i+1}/{total_nm} ({nm_time.utc_strftime('%Y-%m')})...")
         
         t_search = ts.utc(
             nm_time.utc_datetime().year, nm_time.utc_datetime().month, 
@@ -113,7 +113,7 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
 
         max_obscuration = 0.0
         best_time = None
-        e_type = "Žádné"
+        e_type = "None"
 
         obs_sun = observer.at(t_search).observe(sun).apparent()
         obs_moon = observer.at(t_search).observe(moon).apparent()
@@ -141,11 +141,11 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
                     
                     if obscuration >= 99.9:
                         if m_rad >= s_rad:
-                            e_type = "Úplné"
+                            e_type = "Total"
                         else:
-                            e_type = "Prstencové"
+                            e_type = "Annular"
                     elif obscuration > 0.0:
-                        e_type = "Částečné"
+                        e_type = "Partial"
 
         if max_obscuration > 0.1 and best_time is not None:
             best_sun_obs = observer.at(best_time).observe(sun).apparent()
@@ -167,36 +167,36 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
     progress_bar.empty()
     return results
 
-# --- ÚVOD WEBOVÉ APLIKACE ---
-st.title("☀️ Zatmění Slunce – Kalkulátor & 2D Interaktivní Simulátor")
-st.markdown("Aplikace počítá přesné astronomické efemeridy JPL DE440 pro libovolné místo na Zemi a generuje plynulou 2D simulaci průchodu Měsíce.")
+# --- APP TITLE ---
+st.title("☀️ Solar Eclipse – Calculator & 2D Interactive Simulator")
+st.markdown("This application computes high-precision JPL DE440 ephemerides for any location on Earth and generates a 2D simulation of the Moon's transit across the Sun.")
 
-# --- BOČNÍ PANEL ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Vstupní nastavení")
+    st.header("⚙️ Input Parameters")
     
-    coord_input = st.text_input("Souřadnice (WGS84):", value="49.8144375N, 14.4362431E")
+    coord_input = st.text_input("Coordinates (WGS84):", value="50.0835494N, 14.4341414E")
     
     col_y1, col_y2 = st.columns(2)
     with col_y1:
-        start_year = st.number_input("Od roku:", min_value=1550, max_value=2650, value=2024)
+        start_year = st.number_input("From Year:", min_value=1550, max_value=2650, value=2024)
     with col_y2:
-        end_year = st.number_input("Do roku:", min_value=1550, max_value=2650, value=2050)
+        end_year = st.number_input("To Year:", min_value=1550, max_value=2650, value=2050)
         
-    btn_compute = st.button("🚀 Spočítat Zatmění", type="primary", use_container_width=True)
+    btn_compute = st.button("🚀 Calculate Eclipses", type="primary", use_container_width=True)
 
-# --- HLAVNÍ LOGIKA ---
+# --- MAIN LOGIC ---
 try:
     lat, lon = parse_coordinates(coord_input)
     elevation = fetch_elevation(lat, lon)
-    st.sidebar.success(f"Zeměpisná šířka: {lat:.4f}°\n\nZeměpisná délka: {lon:.4f}°\n\nZjištěná výška: {elevation:.1f} m n. m.")
+    st.sidebar.success(f"Latitude: {lat:.4f}°\n\nLongitude: {lon:.4f}°\n\nElevation: {elevation:.1f} m ASL")
 except Exception as e:
-    st.error(f"Chyba ve formátu souřadnic: {e}")
+    st.error(f"Error in coordinate format: {e}")
     st.stop()
 
 if btn_compute or "eclipse_results" in st.session_state:
     if btn_compute:
-        with st.spinner("Počítám astronomická data..."):
+        with st.spinner("Calculating astronomical data..."):
             st.session_state.eclipse_results = compute_eclipses(lat, lon, elevation, start_year, end_year)
             st.session_state.current_lat = lat
             st.session_state.current_lon = lon
@@ -205,25 +205,25 @@ if btn_compute or "eclipse_results" in st.session_state:
     results = st.session_state.get("eclipse_results", [])
 
     if not results:
-        st.warning("V zadaném časovém rozmezí nenastane na daném místě žádné viditelné zatmění Slunce (nad obzorem).")
+        st.warning("No visible solar eclipses found for the given location and time range (above horizon).")
     else:
-        st.subheader(f"📊 Nalezená viditelná zatmění ({len(results)})")
+        st.subheader(f"📊 Visible Eclipses Found ({len(results)})")
         
         table_data = [{
-            "Datum": r["date"],
-            "Čas Maxima (UTC)": r["time_utc"],
-            "Typ Zatmění": r["type"],
-            "Zakrytí Slunce": r["obscuration"],
-            "Výška Slunce": r["alt"]
+            "Date": r["date"],
+            "Peak Time (UTC)": r["time_utc"],
+            "Eclipse Type": r["type"],
+            "Sun Obscuration": r["obscuration"],
+            "Sun Altitude": r["alt"]
         } for r in results]
         
         st.dataframe(table_data, use_container_width=True)
 
         st.divider()
-        st.subheader("🔍 Detailní 2D Simulace a Analýza")
+        st.subheader("🔍 Detailed 2D Simulation & Analysis")
         
         options = [f"{r['date']} | {r['type']} ({r['obscuration']})" for r in results]
-        selected_idx = st.selectbox("Vyberte zatmění pro vykreslení 2D simulace:", range(len(options)), format_func=lambda i: options[i])
+        selected_idx = st.selectbox("Select an eclipse to render 2D simulation:", range(len(options)), format_func=lambda i: options[i])
 
         selected_eclipse = results[selected_idx]
 
@@ -285,7 +285,7 @@ if btn_compute or "eclipse_results" in st.session_state:
         default_idx = max_idx // 2
 
         slider_frame = st.slider(
-            "⏱️ Posun času v průběhu zatmění (UTC):",
+            "⏱️ Time offset during eclipse (UTC):",
             min_value=0,
             max_value=max_idx,
             value=default_idx,
@@ -301,15 +301,15 @@ if btn_compute or "eclipse_results" in st.session_state:
             obscuration_vals = [f["obscuration"] for f in frames_data]
             color_obs = '#ff8c00'
             
-            ax_graph.set_xlabel('Čas (UTC)', fontsize=9)
-            ax_graph.set_ylabel('Zakrytí Slunce (%)', color=color_obs, fontsize=9)
+            ax_graph.set_xlabel('Time (UTC)', fontsize=9)
+            ax_graph.set_ylabel('Sun Obscuration (%)', color=color_obs, fontsize=9)
             ax_graph.plot(dt_list, obscuration_vals, color=color_obs, linewidth=2)
             ax_graph.fill_between(dt_list, obscuration_vals, color=color_obs, alpha=0.2)
             ax_graph.set_ylim(-2, 105)
 
             ax_graph_alt = ax_graph.twinx()
             color_alt = '#1f77b4'
-            ax_graph_alt.set_ylabel('Výška Slunce (°)', color=color_alt, fontsize=9)
+            ax_graph_alt.set_ylabel('Sun Altitude (°)', color=color_alt, fontsize=9)
             ax_graph_alt.plot(dt_list, altitudes, color=color_alt, linestyle='--', linewidth=1.2)
             ax_graph_alt.axhline(0, color='gray', linestyle=':', linewidth=1)
 
@@ -317,7 +317,7 @@ if btn_compute or "eclipse_results" in st.session_state:
 
             ax_graph.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
             fig_graph.autofmt_xdate()
-            ax_graph.set_title("Průběh zakrytí a výšky v čase", fontsize=10, fontweight='bold')
+            ax_graph.set_title("Obscuration & Sun Altitude over Time", fontsize=10, fontweight='bold')
             st.pyplot(fig_graph)
 
         with col_g2:
@@ -335,11 +335,11 @@ if btn_compute or "eclipse_results" in st.session_state:
             ax_sim.add_patch(sun_patch)
             ax_sim.add_patch(moon_patch)
 
-            ax_sim.set_xlabel('Úhlový offset (\')', fontsize=8, color='white')
-            ax_sim.set_ylabel('Úhlový offset (\')', fontsize=8, color='white')
+            ax_sim.set_xlabel('Angular Offset (\')', fontsize=8, color='white')
+            ax_sim.set_ylabel('Angular Offset (\')', fontsize=8, color='white')
             ax_sim.tick_params(colors='white', labelsize=8)
             for spine in ax_sim.spines.values():
                 spine.set_color('#30363d')
 
-            ax_sim.set_title(f"2D Náhled | Čas: {current_frame['time_str']}\nZakrytí: {current_frame['obscuration']:.2f}% | Výška: {current_frame['alt']:.1f}°", fontsize=9, fontweight='bold')
+            ax_sim.set_title(f"2D View | Time: {current_frame['time_str']}\nObscuration: {current_frame['obscuration']:.2f}% | Altitude: {current_frame['alt']:.1f}°", fontsize=9, fontweight='bold')
             st.pyplot(fig_sim)
