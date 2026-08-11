@@ -22,6 +22,7 @@ st.set_page_config(
 R_SUN_KM = 696340.0
 R_MOON_KM = 1737.4
 
+
 def parse_coordinates(coord_str):
     """Naparsuje řetězec se souřadnicemi na dvojici float (lat, lon)."""
     parts = [p.strip() for p in coord_str.split(',')]
@@ -50,6 +51,7 @@ def parse_coordinates(coord_str):
 
     return lat, lon
 
+
 @st.cache_data(ttl=86400)
 def fetch_elevation(lat, lon):
     """Zjištění nadmořské výšky z Open-Meteo API s kešováním."""
@@ -61,6 +63,7 @@ def fetch_elevation(lat, lon):
     except Exception:
         pass
     return 0.0
+
 
 def calculate_circle_intersection_area(r_s, r_m, d):
     """Spočítá plochu překryvu dvou kružnic na obloze."""
@@ -77,6 +80,7 @@ def calculate_circle_intersection_area(r_s, r_m, d):
                0.5 * np.sqrt(max(0.0, (-d + r_s + r_m) * (d + r_s - r_m) * (d - r_s + r_m) * (d + r_s + r_m))))
     return overlap
 
+
 @st.cache_resource
 def load_ephemeris():
     """Načte astronomické efemeridy JPL DE440 s kešováním."""
@@ -84,6 +88,8 @@ def load_ephemeris():
     eph = load('de440.bsp')
     return ts, eph
 
+
+@st.cache_data(ttl=3600, show_spinner="Počítám astronomická data...")
 def compute_eclipses(lat, lon, elevation, start_year, end_year):
     """Vypočítá viditelná zatmění pro zadané období a souřadnice."""
     ts, eph = load_ephemeris()
@@ -99,12 +105,7 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
     new_moons = times[phases == 0]
     results = []
 
-    progress_bar = st.progress(0, text="Astronomical analysis in progress...")
-    total_nm = len(new_moons)
-
     for i, nm_time in enumerate(new_moons):
-        progress_bar.progress((i + 1) / total_nm, text=f"Analyzing new moon {i+1}/{total_nm} ({nm_time.utc_strftime('%Y-%m')})...")
-        
         t_search = ts.utc(
             nm_time.utc_datetime().year, nm_time.utc_datetime().month, 
             nm_time.utc_datetime().day, nm_time.utc_datetime().hour - 4, 
@@ -113,7 +114,7 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
 
         max_obscuration = 0.0
         best_time = None
-        e_type = "None"
+        e_type = "Žádné"
 
         obs_sun = observer.at(t_search).observe(sun).apparent()
         obs_moon = observer.at(t_search).observe(moon).apparent()
@@ -141,11 +142,11 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
                     
                     if obscuration >= 99.9:
                         if m_rad >= s_rad:
-                            e_type = "Total"
+                            e_type = "Úplné"
                         else:
-                            e_type = "Annular"
+                            e_type = "Prstencové"
                     elif obscuration > 0.0:
-                        e_type = "Partial"
+                        e_type = "Částečné"
 
         if max_obscuration > 0.1 and best_time is not None:
             best_sun_obs = observer.at(best_time).observe(sun).apparent()
@@ -160,137 +161,150 @@ def compute_eclipses(lat, lon, elevation, start_year, end_year):
                     "obscuration_val": max_obscuration,
                     "obscuration": f"{max_obscuration:.2f} %",
                     "alt": f"{alt.degrees:.1f}°",
-                    "raw_time": dt_utc,
-                    "best_time_obj": best_time
+                    "raw_time": dt_utc
                 })
 
-    progress_bar.empty()
     return results
 
+
+@st.cache_data(ttl=3600, show_spinner="Příprava dat pro simulaci...")
+def compute_eclipse_frames(lat, lon, elevation, peak_dt):
+    """
+    Klíčová funkce: Přespočítá a vykešuje všech 240 snímků simulace.
+    Díky kešování reakce posuvníku v UI nezpožďuje výpočet dráhy.
+    """
+    ts, eph = load_ephemeris()
+    sun, moon, earth = eph['sun'], eph['moon'], eph['earth']
+    observer = earth + wgs84.latlon(lat, lon, elevation_m=elevation)
+
+    start_dt = peak_dt - timedelta(hours=2)
+    minutes = range(241)
+    t_range = ts.utc(start_dt.year, start_dt.month, start_dt.day, start_dt.hour, start_dt.minute + np.array(minutes))
+
+    obs_sun_range = observer.at(t_range).observe(sun).apparent()
+    obs_moon_range = observer.at(t_range).observe(moon).apparent()
+
+    sep_range = obs_sun_range.separation_from(obs_moon_range).radians
+    d_sun_range = obs_sun_range.distance().km
+    d_moon_range = obs_moon_range.distance().km
+
+    r_sun_rad = np.arcsin(R_SUN_KM / d_sun_range)
+    r_moon_rad = np.arcsin(R_MOON_KM / d_moon_range)
+    altitudes = obs_sun_range.altaz()[0].degrees
+
+    frames_data = []
+    dt_list = []
+
+    for i in range(len(t_range)):
+        dt = t_range[i].utc_datetime()
+        dt_list.append(dt)
+
+        s_rad, m_rad, d_val = r_sun_rad[i], r_moon_rad[i], sep_range[i]
+
+        if d_val < (s_rad + m_rad):
+            sun_area = np.pi * (s_rad ** 2)
+            intersection = calculate_circle_intersection_area(s_rad, m_rad, d_val)
+            obs_pct = (intersection / sun_area) * 100.0
+        else:
+            obs_pct = 0.0
+
+        ra_s, dec_s, _ = obs_sun_range[i].radec()
+        ra_m, dec_m, _ = obs_moon_range[i].radec()
+
+        delta_ra_arcmin = (ra_m.hours - ra_s.hours) * 15.0 * 60.0 * np.cos(dec_s.radians)
+        delta_dec_arcmin = (dec_m.degrees - dec_s.degrees) * 60.0
+
+        frames_data.append({
+            "time_str": dt.strftime("%H:%M:%S UTC"),
+            "dt": dt,
+            "obscuration": float(obs_pct),
+            "alt": float(altitudes[i]),
+            "delta_ra": float(delta_ra_arcmin),
+            "delta_dec": float(delta_dec_arcmin),
+            "sun_r": float(np.degrees(s_rad) * 60.0),
+            "moon_r": float(np.degrees(m_rad) * 60.0)
+        })
+
+    return frames_data, dt_list, [float(a) for a in altitudes]
+
+
 # --- NADPIS ---
-st.title("☀️ Solar Eclipse – Calculator & 2D Interactive Simulator")
-st.markdown("This application computes high-precision JPL DE440 ephemerides for any location on Earth and generates a 2D simulation of the Moon's transit across the Sun.")
+st.title("☀️ Solar Eclipse – Kalkulátor a plynulý 2D Simulátor")
+st.markdown("Výpočet přesných JPL DE440 efemerid pro libovolné místo na Zemi s plynulou 2D simulací průběhu.")
 
 # --- BOČNÍ PANEL ---
 with st.sidebar:
-    st.header("⚙️ Input Parameters")
-    
-    coord_input = st.text_input("Coordinates (WGS84):", value="50.0835494N, 14.4341414E")
+    st.header("⚙️ Vstupní parametry")
+    coord_input = st.text_input("Souřadnice (WGS84):", value="50.0835494N, 14.4341414E")
     
     col_y1, col_y2 = st.columns(2)
     with col_y1:
-        start_year = st.number_input("From Year:", min_value=1550, max_value=2650, value=2024)
+        start_year = st.number_input("Od roku:", min_value=1550, max_value=2650, value=2024)
     with col_y2:
-        end_year = st.number_input("To Year:", min_value=1550, max_value=2650, value=2050)
+        end_year = st.number_input("Do roku:", min_value=1550, max_value=2650, value=2050)
         
-    btn_compute = st.button("🚀 Calculate Eclipses", type="primary", use_container_width=True)
+    btn_compute = st.button("🚀 Vypočítat zatmění", type="primary", use_container_width=True)
 
 # --- HLAVNÍ LOGIKA ---
 try:
     lat, lon = parse_coordinates(coord_input)
     elevation = fetch_elevation(lat, lon)
-    st.sidebar.success(f"Latitude: {lat:.4f}°\n\nLongitude: {lon:.4f}°\n\nElevation: {elevation:.1f} m ASL")
+    st.sidebar.success(f"Šířka: {lat:.4f}°\n\nDélka: {lon:.4f}°\n\nVýška: {elevation:.1f} m n. m.")
 except Exception as e:
-    st.error(f"Error in coordinate format: {e}")
+    st.error(f"Chyba ve formátu souřadnic: {e}")
     st.stop()
 
 if btn_compute or "eclipse_results" in st.session_state:
     if btn_compute:
-        with st.spinner("Calculating astronomical data..."):
-            st.session_state.eclipse_results = compute_eclipses(lat, lon, elevation, start_year, end_year)
-            st.session_state.current_lat = lat
-            st.session_state.current_lon = lon
-            st.session_state.current_elev = elevation
+        st.session_state.eclipse_results = compute_eclipses(lat, lon, elevation, start_year, end_year)
+        st.session_state.current_lat = lat
+        st.session_state.current_lon = lon
+        st.session_state.current_elev = elevation
 
     results = st.session_state.get("eclipse_results", [])
 
     if not results:
-        st.warning("No visible solar eclipses found for the given location and time range (above horizon).")
+        st.warning("Pro zadanou polohu a časový rozsah nebylo nalezeno žádné viditelné zatmění (nad obzorem).")
     else:
-        st.subheader(f"📊 Visible Eclipses Found ({len(results)})")
+        st.subheader(f"📊 Nalezená viditelná zatmění ({len(results)})")
         
         table_data = [{
-            "Date": r["date"],
-            "Peak Time (UTC)": r["time_utc"],
-            "Eclipse Type": r["type"],
-            "Sun Obscuration": r["obscuration"],
-            "Sun Altitude": r["alt"]
+            "Datum": r["date"],
+            "Čas maxima (UTC)": r["time_utc"],
+            "Typ zatmění": r["type"],
+            "Zakrytí Slunce": r["obscuration"],
+            "Výška Slunce": r["alt"]
         } for r in results]
         
         st.dataframe(table_data, use_container_width=True)
 
         st.divider()
-        st.subheader("🔍 Detailed 2D Simulation & Analysis")
+        st.subheader("🔍 Detailní 2D Simulace a Graf")
         
         options = [f"{r['date']} | {r['type']} ({r['obscuration']})" for r in results]
-        selected_idx = st.selectbox("Select an eclipse to render 2D simulation:", range(len(options)), format_func=lambda i: options[i])
-
+        selected_idx = st.selectbox("Vyberte zatmění pro simulaci:", range(len(options)), format_func=lambda i: options[i])
         selected_eclipse = results[selected_idx]
 
-        ts, eph = load_ephemeris()
-        sun, moon, earth = eph['sun'], eph['moon'], eph['earth']
-        observer = earth + wgs84.latlon(st.session_state.current_lat, st.session_state.current_lon, elevation_m=st.session_state.current_elev)
-
-        peak_dt = selected_eclipse['raw_time']
-        start_dt = peak_dt - timedelta(hours=2)
-        
-        minutes = range(241)
-        t_range = ts.utc(start_dt.year, start_dt.month, start_dt.day, start_dt.hour, start_dt.minute + np.array(minutes))
-
-        obs_sun_range = observer.at(t_range).observe(sun).apparent()
-        obs_moon_range = observer.at(t_range).observe(moon).apparent()
-
-        sep_range = obs_sun_range.separation_from(obs_moon_range).radians
-        d_sun_range = obs_sun_range.distance().km
-        d_moon_range = obs_moon_range.distance().km
-
-        r_sun_rad = np.arcsin(R_SUN_KM / d_sun_range)
-        r_moon_rad = np.arcsin(R_MOON_KM / d_moon_range)
-        altitudes = obs_sun_range.altaz()[0].degrees
-
-        frames_data = []
-        dt_list = []
-
-        for i in range(len(t_range)):
-            dt = t_range[i].utc_datetime()
-            dt_list.append(dt)
-
-            s_rad, m_rad, d_val = r_sun_rad[i], r_moon_rad[i], sep_range[i]
-
-            if d_val < (s_rad + m_rad):
-                sun_area = np.pi * (s_rad ** 2)
-                intersection = calculate_circle_intersection_area(s_rad, m_rad, d_val)
-                obs_pct = (intersection / sun_area) * 100.0
-            else:
-                obs_pct = 0.0
-
-            ra_s, dec_s, _ = obs_sun_range[i].radec()
-            ra_m, dec_m, _ = obs_moon_range[i].radec()
-
-            delta_ra_arcmin = (ra_m.hours - ra_s.hours) * 15.0 * 60.0 * np.cos(dec_s.radians)
-            delta_dec_arcmin = (dec_m.degrees - dec_s.degrees) * 60.0
-
-            frames_data.append({
-                "time_str": dt.strftime("%H:%M:%S UTC"),
-                "dt": dt,
-                "obscuration": obs_pct,
-                "alt": altitudes[i],
-                "delta_ra": delta_ra_arcmin,
-                "delta_dec": delta_dec_arcmin,
-                "sun_r": np.degrees(s_rad) * 60.0,
-                "moon_r": np.degrees(m_rad) * 60.0
-            })
-
-        # Zde nahrazujeme st.slider komponentou st.select_slider pro plnou kompatibilitu
-        default_frame = frames_data[len(frames_data) // 2]
-        
-        current_frame = st.select_slider(
-            "⏱️ Time offset during eclipse (UTC):",
-            options=frames_data,
-            value=default_frame,
-            format_func=lambda f: f["time_str"] if isinstance(f, dict) and "time_str" in f else ""
+        # Načtení vykešovaných dat pro simulaci vybraného zatmění
+        frames_data, dt_list, altitudes = compute_eclipse_frames(
+            st.session_state.current_lat, 
+            st.session_state.current_lon, 
+            st.session_state.current_elev, 
+            selected_eclipse['raw_time']
         )
 
+        # Časový posuvník propojený s rychlým indexem
+        slider_idx = st.slider(
+            "⏱️ Posun času při zatmění (UTC):",
+            min_value=0,
+            max_value=len(frames_data) - 1,
+            value=len(frames_data) // 2,
+            format_func=lambda i: frames_data[i]["time_str"]
+        )
+
+        current_frame = frames_data[slider_idx]
+
+        # Vykreslení grafu a simulace
         col_g1, col_g2 = st.columns([1.2, 1])
 
         with col_g1:
@@ -298,24 +312,25 @@ if btn_compute or "eclipse_results" in st.session_state:
             obscuration_vals = [f["obscuration"] for f in frames_data]
             color_obs = '#ff8c00'
             
-            ax_graph.set_xlabel('Time (UTC)', fontsize=9)
-            ax_graph.set_ylabel('Sun Obscuration (%)', color=color_obs, fontsize=9)
+            ax_graph.set_xlabel('Čas (UTC)', fontsize=9)
+            ax_graph.set_ylabel('Zakrytí Slunce (%)', color=color_obs, fontsize=9)
             ax_graph.plot(dt_list, obscuration_vals, color=color_obs, linewidth=2)
             ax_graph.fill_between(dt_list, obscuration_vals, color=color_obs, alpha=0.2)
             ax_graph.set_ylim(-2, 105)
 
             ax_graph_alt = ax_graph.twinx()
             color_alt = '#1f77b4'
-            ax_graph_alt.set_ylabel('Sun Altitude (°)', color=color_alt, fontsize=9)
+            ax_graph_alt.set_ylabel('Výška Slunce (°)', color=color_alt, fontsize=9)
             ax_graph_alt.plot(dt_list, altitudes, color=color_alt, linestyle='--', linewidth=1.2)
             ax_graph_alt.axhline(0, color='gray', linestyle=':', linewidth=1)
 
+            # Červená ryska aktuální pozice z posuvníku
             ax_graph.axvline(current_frame["dt"], color='red', linestyle='-', linewidth=2)
 
             ax_graph.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
             fig_graph.autofmt_xdate()
-            ax_graph.set_title("Obscuration & Sun Altitude over Time", fontsize=10, fontweight='bold')
-            st.pyplot(fig_graph)
+            ax_graph.set_title("Průběh zakrytí a výška Slunce", fontsize=10, fontweight='bold')
+            st.pyplot(fig_graph, clear_figure=True)
 
         with col_g2:
             fig_sim, ax_sim = plt.subplots(figsize=(5, 4))
@@ -332,11 +347,14 @@ if btn_compute or "eclipse_results" in st.session_state:
             ax_sim.add_patch(sun_patch)
             ax_sim.add_patch(moon_patch)
 
-            ax_sim.set_xlabel('Angular Offset (\')', fontsize=8, color='white')
-            ax_sim.set_ylabel('Angular Offset (\')', fontsize=8, color='white')
+            ax_sim.set_xlabel("Úhlový posun (')", fontsize=8, color='white')
+            ax_sim.set_ylabel("Úhlový posun (')", fontsize=8, color='white')
             ax_sim.tick_params(colors='white', labelsize=8)
             for spine in ax_sim.spines.values():
                 spine.set_color('#30363d')
 
-            ax_sim.set_title(f"2D View | Time: {current_frame['time_str']}\nObscuration: {current_frame['obscuration']:.2f}% | Altitude: {current_frame['alt']:.1f}°", fontsize=9, fontweight='bold')
-            st.pyplot(fig_sim)
+            ax_sim.set_title(
+                f"2D Pohled | Čas: {current_frame['time_str']}\nZakrytí: {current_frame['obscuration']:.2f}% | Výška: {current_frame['alt']:.1f}°", 
+                fontsize=9, fontweight='bold', color='white'
+            )
+            st.pyplot(fig_sim, clear_figure=True)
